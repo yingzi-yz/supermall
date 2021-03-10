@@ -4,16 +4,23 @@
       <div slot="center">购物街</div>
     </nav-bar>
 
+    <tab-control :titles="['流行', '新款', '精选']" 
+                 v-on:tabClick="tabClick" 
+                 ref="tabControl1"
+                 class="tab-control" v-show="isTabFixed"></tab-control>
+
     <scroll class="content" 
             ref="scroll" 
             :probe-type="3" 
             @scroll="contentScroll" 
             :pull-up-load="true"
             @pullingUp="loadMore">
-      <home-swiper :banners="banners"></home-swiper>
+      <home-swiper :banners="banners" @swiperImageLoad="swiperImageLoad"></home-swiper>
       <recommend-view :recommends="recommends"></recommend-view>
       <feature-view></feature-view>
-      <tab-control class="tab-control" :titles="['流行', '新款', '精选']" v-on:tabClick="tabClick"></tab-control>
+      <tab-control :titles="['流行', '新款', '精选']" 
+                   v-on:tabClick="tabClick" 
+                   ref="tabControl2"></tab-control>
       <goods-list :goods="showGoods"></goods-list>
     </scroll>
 
@@ -27,15 +34,14 @@
   import GoodsList from 'components/content/goods/GoodsList'
   import GoodsListItem from 'components/content/goods/GoodsListItem'
   import Scroll from 'components/common/scroll/Scroll'
-  import BackTop from 'components/content/backTop/BackTop'
 
   import HomeSwiper from './childComps/HomeSwiper'
   import RecommendView from './childComps/RecommendView'
   import FeatureView from './childComps/FeatureView'
 
   import {getHomeMultidata, getHomeGoods} from 'network/home'
-
-  import BScroll from 'better-scroll'
+  import {debounce} from 'common/utils'
+  import {ItemListenerMixin, backTopMixin} from 'common/mixin'
 
   export default {
     name: "Home",
@@ -45,11 +51,11 @@
       GoodsList,
       GoodsListItem,
       Scroll,
-      BackTop,
       HomeSwiper,
       RecommendView,
       FeatureView,
     },
+    mixins: [ItemListenerMixin, backTopMixin],
     data() {
       return {
         banners: [],
@@ -60,13 +66,27 @@
           sell: {page: 0, list: []},
         },
         currentType: 'pop',
-        isShowBackTop: false
+        tabOffsetTop: 0,
+        isTabFixed: false,
+        saveY: 0,
       }
     },
     computed: {
       showGoods() {
         return this.goods[this.currentType].list;
       }
+    },
+    destroyed() {
+    },
+    activated() {
+      this.$refs.scroll.scrollTo(0, this.saveY, 0);
+      this.$refs.scroll.refresh();
+    },
+    deactivated() {
+      this.saveY = this.$refs.scroll.getScrollY();
+
+      // 取消全局事件的监听
+      this.$bus.$off('itemImageLoad', this.itemImgListener);
     },
     created() {
       // 1. 请求多个数据
@@ -76,6 +96,8 @@
       this.getHomeGoods('pop')
       this.getHomeGoods('new')
       this.getHomeGoods('sell')
+    },
+    mounted() {
     },
     methods: {
       // 事件监听相关方法
@@ -91,16 +113,22 @@
             this.currentType = 'sell';
             break;
         }
-      },
-      backClick() {
-        this.$refs.scroll.scrollTo(0, 0, 500);
+        this.$refs.tabControl1.currentIndex = index;
+        this.$refs.tabControl2.currentIndex = index;
       },
       contentScroll(position) {
+        // 判断BackTop是否显示
         // this.isShowBackTop = position.y < -1000;
         this.isShowBackTop = (-position.y) > 1000;
+
+        // 决定tabControl是否吸顶
+        this.isTabFixed = (-position.y) > this.tabOffsetTop;
       },
       loadMore() {
         this.getHomeGoods(this.currentType);
+      },
+      swiperImageLoad() {
+        this.tabOffsetTop = this.$refs.tabControl2.$el.offsetTop;
       },
 
       // 网络请求相关方法
@@ -115,7 +143,9 @@
         getHomeGoods(type, page).then(res => {
           // 将数组解析依次添加到另一个数组
           this.goods[type].list.push(...res.data.list);
-          this.goods[type].list.page += 1;
+          this.goods[type].page += 1;
+
+          // 完成上拉加载更多,better-scroll默认只能加载一次
           this.$refs.scroll.finishPullUp();
         })
       }
@@ -142,12 +172,6 @@
     color: #fff;
   }
 
-  .tab-control {
-    position: sticky;
-    top: 44px;
-    z-index: 9;
-  }
-
   /* .content {
     height: calc(100% - 93px);
     margin-top: 44px;
@@ -161,5 +185,10 @@
     left: 0;
     right: 0;
     overflow: hidden;
+  }
+
+  .tab-control {
+    position: relative;
+    z-index: 9;
   }
 </style>
